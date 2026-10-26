@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mis ganancias</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--text:#1c2430;--muted:#6b7686;--line:#e3e7ed;--accent:#1f7a5a;--accent-t:#fff;--danger:#c0392b;--soft:#e6f3ee;color-scheme:light;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161c;--card:#1b212a;--text:#e8ecf1;--muted:#9aa5b4;--line:#2b3340;--accent:#3fbf93;--accent-t:#0c1a14;--danger:#ff7a6b;--soft:#1d3a31;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#12161c;--card:#1b212a;--text:#e8ecf1;--muted:#9aa5b4;--line:#2b3340;--accent:#3fbf93;--accent-t:#0c1a14;--danger:#ff7a6b;--soft:#1d3a31;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+main{max-width:520px;margin:0 auto;padding:16px}
+h1{font-size:1.4rem;margin:8px 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:14px}
+label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:4px}
+input{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.preview{font-size:.9rem;color:var(--muted);margin:2px 0 10px}
+.preview b{color:var(--text)}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px}
+.add{width:100%;padding:12px;background:var(--accent);color:var(--accent-t);font-weight:600}
+.seg{display:flex;gap:6px;margin-top:10px}
+.seg button{flex:1;padding:9px 4px;background:var(--bg);color:var(--text);border:1px solid var(--line);font-size:.85rem}
+.seg button.on{background:var(--accent);color:var(--accent-t);border-color:var(--accent);font-weight:600}
+.sum{background:var(--soft);border-color:transparent;text-align:center}
+.sum .big{font-size:2rem;font-weight:700;color:var(--accent)}
+.sum .sub{color:var(--muted);font-size:.9rem}
+.item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0;border-top:1px solid var(--line)}
+.item:first-child{border-top:0}
+.item .d{font-weight:600;text-transform:capitalize}
+.item .m{font-size:.82rem;color:var(--muted)}
+.item .t{font-weight:700;white-space:nowrap}
+.del{background:none;color:var(--danger);font-size:1.1rem;padding:6px 8px}
+.empty{color:var(--muted);text-align:center;padding:10px 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>💶 Mis ganancias</h1>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="fecha">Fecha</label><input id="fecha" type="date"></div>
+      <div><label for="tarifa">Precio por hora (€)</label><input id="tarifa" type="number" inputmode="decimal" step="0.01" min="0" placeholder="10"></div>
+    </div>
+    <div style="margin-bottom:10px"><label for="horas">Horas trabajadas</label><input id="horas" type="number" inputmode="decimal" step="0.25" min="0" placeholder="8"></div>
+    <div class="preview">Total de este día: <b id="prev">0,00 €</b></div>
+    <button class="add" id="add">Añadir</button>
+  </div>
+
+  <div class="card">
+    <label for="mes">Mes</label>
+    <input id="mes" type="month">
+    <div class="seg" id="seg">
+      <button data-q="0" class="on">Mes completo</button>
+      <button data-q="1">1ª quincena</button>
+      <button data-q="2">2ª quincena</button>
+    </div>
+  </div>
+
+  <div class="card sum">
+    <div class="sub" id="rango"></div>
+    <div class="big" id="total">0,00 €</div>
+    <div class="sub" id="detalle"></div>
+  </div>
+
+  <div class="card" id="lista"></div>
+</main>
+
+<script>
+var KEY = "ganancias:v1";
+var mem = { entries: [], rate: "" };
+function load() {
+  try { var r = localStorage.getItem(KEY); if (r) mem = JSON.parse(r); } catch (e) {}
+  if (!mem || !Array.isArray(mem.entries)) mem = { entries: [], rate: "" };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(mem)); } catch (e) {} }
+
+var eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
+var num = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 2 });
+var $ = function (id) { return document.getElementById(id); };
+var quincena = 0;
+
+function hoy() {
+  var d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
+function val(id) { return parseFloat(String($(id).value).replace(",", ".")) || 0; }
+
+function preview() { $("prev").textContent = eur.format(val("tarifa") * val("horas")); }
+
+function render() {
+  var mes = $("mes").value || hoy().slice(0, 7);
+  var lista = mem.entries.filter(function (e) {
+    if (e.fecha.slice(0, 7) !== mes) return false;
+    var dia = parseInt(e.fecha.slice(8, 10), 10);
+    if (quincena === 1) return dia <= 15;
+    if (quincena === 2) return dia >= 16;
+    return true;
+  }).sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+
+  var total = 0, horas = 0;
+  lista.forEach(function (e) { total += e.tarifa * e.horas; horas += e.horas; });
+
+  var y = parseInt(mes.slice(0, 4), 10), m = parseInt(mes.slice(5, 7), 10);
+  var nombre = new Date(y, m - 1, 1).toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+  var ultimo = new Date(y, m, 0).getDate();
+  var txt = quincena === 1 ? "1ª quincena (1–15) de " : quincena === 2 ? "2ª quincena (16–" + ultimo + ") de " : "Todo ";
+  $("rango").textContent = txt + nombre;
+  $("total").textContent = eur.format(total);
+  $("detalle").textContent = num.format(horas) + " h trabajadas · " + lista.length + (lista.length === 1 ? " día" : " días");
+
+  var box = $("lista");
+  box.innerHTML = "";
+  if (!lista.length) {
+    var p = document.createElement("div");
+    p.className = "empty";
+    p.textContent = "Todavía no hay registros en este periodo.";
+    box.appendChild(p);
+    return;
+  }
+  lista.forEach(function (e) {
+    var row = document.createElement("div");
+    row.className = "item";
+    var f = new Date(e.fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+    var left = document.createElement("div");
+    var d = document.createElement("div"); d.className = "d"; d.textContent = f;
+    var mm = document.createElement("div"); mm.className = "m"; mm.textContent = num.format(e.horas) + " h × " + eur.format(e.tarifa);
+    left.appendChild(d); left.appendChild(mm);
+    var t = document.createElement("div"); t.className = "t"; t.textContent = eur.format(e.tarifa * e.horas);
+    var b = document.createElement("button"); b.className = "del"; b.textContent = "✕"; b.setAttribute("aria-label", "Borrar");
+    b.onclick = function () {
+      mem.entries = mem.entries.filter(function (x) { return x.id !== e.id; });
+      save(); render();
+    };
+    var right = document.createElement("div"); right.style.display = "flex"; right.style.alignItems = "center";
+    right.appendChild(t); right.appendChild(b);
+    row.appendChild(left); row.appendChild(right);
+    box.appendChild(row);
+  });
+}
+
+$("add").onclick = function () {
+  var f = $("fecha").value, t = val("tarifa"), h = val("horas");
+  if (!f || t <= 0 || h <= 0) { alert("Rellena la fecha, el precio por hora y las horas."); return; }
+  mem.entries.push({ id: Date.now() + Math.random(), fecha: f, tarifa: t, horas: h });
+  mem.rate = $("tarifa").value;
+  save();
+  $("horas").value = "";
+  $("mes").value = f.slice(0, 7);
+  preview(); render();
+};
+["tarifa", "horas"].forEach(function (id) { $(id).addEventListener("input", preview); });
+$("mes").addEventListener("change", render);
+$("seg").addEventListener("click", function (ev) {
+  var q = ev.target.getAttribute("data-q");
+  if (q === null) return;
+  quincena = parseInt(q, 10);
+  Array.prototype.forEach.call($("seg").children, function (b) { b.classList.toggle("on", b === ev.target); });
+  render();
+});
+
+load();
+$("fecha").value = hoy();
+$("mes").value = hoy().slice(0, 7);
+$("tarifa").value = mem.rate || "";
+preview(); render();
+</script>
+</body>
+</html>
